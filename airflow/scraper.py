@@ -255,15 +255,37 @@ def stage2_scraper(document_id, title, url):
 
         try:
             # Extract the overview text
-            overview_content = soup.find_all('div', class_='article__paragraph')
             
+            # Look for <div class="article__paragraph"> and scrape its content
+            overview_content = soup.find_all('div', class_='article__paragraph')
             if overview_content:
                 for div in overview_content:
-                    paragraphs = div.find_all('p')
-                    for para in paragraphs:
-                        overview += unidecode(para.get_text().strip().replace("\n", ""))
-            else:
-                logger.warning("SCRAPER - stage2_scraper() - Overview content not found.")
+                    
+                    # Extract text from <p>, <ol>, and <ul> tags
+                    for tag in div.find_all(['p', 'ol', 'ul']):
+                        overview = overview + " " + unidecode(tag.get_text().strip().replace("\n", ""))
+
+            # Fallback if <div class="article__paragraph"> is missing (Aggressive scraping)
+            if not overview:
+                logger.warning("SCRAPER - stage2_scraper() - Overview content seems to be missing. Performing brute force search...")
+
+                article_body = soup.find('article', class_='grid__item--article-body')
+                if article_body:
+                    
+                    # Extract from <span class="overview__content">
+                    span_content = article_body.find('span', class_='overview__content')
+                    if span_content:
+                        for para in span_content.find_all('p'):
+                            overview = overview + " " + unidecode(para.get_text().strip().replace("\n", ""))
+
+                    # Extract from <div> tags without any class
+                    div_without_class = article_body.find_all('div', class_=None)
+                    for div in div_without_class:
+                        
+                        for tag in div.find_all(['p', 'ol', 'ul'], class_=None):
+                            overview = overview + " " + unidecode(tag.get_text().strip().replace("\n", "").replace("\t\t\t\t\t", " "))
+
+                    logger.info("SCRAPER - stage2_scraper() - Overview content generated")
 
         except Exception as exception:
             logger.error("SCRAPER - stage2_scraper() - Error extracting overview")
@@ -323,7 +345,7 @@ def stage2_scraper(document_id, title, url):
             with open(metadata_file, "w") as file:
                 json.dump(metadata, file, indent=4)
             
-            logger.info(f"SCRAPER stage2_scraper() - Metadata saved: {metadata_file}")
+            logger.info(f"SCRAPER - stage2_scraper() - Metadata saved: {metadata_file}")
 
         except Exception as exception:
             logger.error("SCRAPER - stage2_scraper() - Error creating metadata.json")
