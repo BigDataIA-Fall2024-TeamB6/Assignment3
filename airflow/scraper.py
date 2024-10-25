@@ -229,10 +229,23 @@ def stage2_scraper(document_id, title, url):
 
         try:
             # Extract the PDF download URL
-            download_content = soup.find('a', class_="content-asset--primary")
+            download_content = soup.find('a', class_="content-asset content-asset--primary")
             
             if download_content and download_content.get("href", None):
-                download_url = url_prefix + download_content.get("href")
+                if download_content.get("href").endswith(".pdf"):
+                    download_url = url_prefix + download_content.get("href")
+                
+                else:
+                    
+                    # There is one case where the link of the PDF is not available directly
+                    section_content = soup.find('section', class_="article-meta__container items grid__item--article-element")
+                    
+                    if section_content:
+                        url_content = soup.find('a', class_="items__item")
+
+                        if url_content and url_content.get("href", None):
+                            download_url = url_prefix + url_content.get("href")
+                
             else:
                 logger.error("SCRAPER - stage2_scraper() - PDF download link not found.")
 
@@ -424,7 +437,7 @@ def stage2_controller():
 
 
 def main():
-    # stage1_controller()
+    stage1_controller()
     stage2_controller()
 
 if __name__ == "__main__":
