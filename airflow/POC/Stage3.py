@@ -27,8 +27,8 @@ def upload_folder_to_s3(folder_path, bucket):
                 print(f"Client error: {e}")
 
 # Example usage:
-folder_path = "/Users/ramyyogeshkumarsolanki/Documents/GitHub/Assignment3/airflow/POC/downloads"  # Specify the path to the folder you want to upload
-bucket = "ddddemo-damg7245-fall2024"  # Specify the S3 bucket name
+folder_path = os.path.join(os.getcwd(), os.getenv('DOWNLOAD_DIRECTORY', 'downloads'))  # Specify the path to the folder you want to upload
+bucket = os.getenv('AWS_BUCKET_NAME')  # Specify the S3 bucket name
 
 # Call the function to upload the folder
 upload_folder_to_s3(folder_path, bucket)
