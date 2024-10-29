@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from unstructured.partition.pdf import partition_pdf
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_text_splitters import CharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
@@ -32,18 +32,20 @@ pytesseract.pytesseract.tesseract_cmd = "C:\\Program Files\\Tesseract-OCR\\tesse
 
 # ============================== Handling Text based content ==============================
 
-def extract_pdf_elements(path, fname):
+def extract_pdf_elements(fpath, fname):
     """ Extract images, tables, and chunk text from a PDF file """
     
     return partition_pdf(
-        filename                    = os.path.join(path, fname),
-        extract_images_in_pdf       = True,
-        infer_table_structure       = True,
-        chunking_strategy           = "by_title",
-        max_characters              = 4000,
-        new_after_n_chars           = 3800,
-        combine_text_under_n_chars  = 2000,
-        image_output_dir_path       = path,
+        filename                        = os.path.join(fpath, fname),
+        starting_page_number            = 5,
+        extract_images_in_pdf           = True,
+        extract_image_block_types       = ["Image", "Table"],
+        infer_table_structure           = True,
+        chunking_strategy               = "by_title",
+        max_characters                  = 4000,
+        new_after_n_chars               = 3800,
+        combine_text_under_n_chars      = 2000,
+        extract_image_block_output_dir  = os.path.join(fpath, os.getenv("EXTRACTED_IMAGE_DIRECTORY")),
     )
 
 def categorize_elements(raw_pdf_elements):
@@ -67,7 +69,7 @@ def preprocess_text(raw_text):
     processed_text = []
 
     for text in raw_text:
-        new_text = text.replace('\n', ' ')
+        new_text = text.replace('\n', ' ').replace('- ', '').replace('  ', '')
         processed_text.append(unidecode(new_text))
     
     return processed_text
@@ -82,13 +84,14 @@ def chunk_pdf(fpath, fname):
     texts, tables = categorize_elements(raw_pdf_elements)
 
     # Remove irrelevant characters to avoid tokenizing issues
-    texts = preprocess_text(texts)
+    # texts = preprocess_text(texts)
 
     # Enforce a specific token size for texts
     # Use tiktoken for tokenizing
-    text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+    text_splitter = RecursiveCharacterTextSplitter(
         chunk_size      = 4000, 
-        chunk_overlap   = 500
+        chunk_overlap   = 500,
+        add_start_index = True
     )
     
     # Merge all the texts in the texts[]
@@ -103,9 +106,9 @@ def generate_text_summaries(texts, tables, summarize_texts=False):
     """ Summarize text elements if needed """
 
     # Define the prompt message for summarizing the text
-    prompt_text = """You are an assistant tasked with summarizing tables and text for retrieval. \
+    prompt_text = """You are an assistant tasked with summarizing tables and text for retrieval via RAGs. \
     These summaries will be embedded and used to retrieve the raw text or table elements. \
-    Give a concise summary of the table or text that is well optimized for retrieval. Table or text: {element} """
+    Give a concise summary of the table or text that is well optimized for retrieval via RAGs. Table or text: {element} """
     
     prompt = ChatPromptTemplate.from_template(prompt_text)
 
@@ -181,9 +184,10 @@ def generate_img_summaries(path):
     image_summaries = []
 
     # Define the prompt message for summarizing the images
-    prompt = """You are an assistant tasked with summarizing images for retrieval. \
-    These summaries will be embedded and used to retrieve the raw image. \
-    Give a concise summary of the image that is well optimized for retrieval."""
+    prompt = """You are an assistant tasked with summarizing images for retrieval via RAGs. \
+    These summaries will be embedded and used to retrieve the raw image via RAGs. \
+    If you encounter an image that seems to be a logo or a cover image or a barcode, simply respond by saying IRRELEVANT IMAGE. \
+    Give a concise summary of the image that is well optimized for retrieval via RAGs."""
 
     # Apply to images
     for img_file in sorted(os.listdir(path)):
@@ -197,7 +201,7 @@ def generate_img_summaries(path):
 
     return img_base64_list, image_summaries
 
-def save_preprocessed_context(fpath, texts, text_summaries, tables, table_summaries, img_base64_list, image_summaries):
+def save_preprocessed_context(fpath, json_file, texts, text_summaries, tables, table_summaries, img_base64_list, image_summaries):
 
     texts_uuid_list  = [str(uuid.uuid4()) for _ in texts]
     tables_uuid_list = [str(uuid.uuid4()) for _ in tables]
@@ -215,8 +219,7 @@ def save_preprocessed_context(fpath, texts, text_summaries, tables, table_summar
         "images_uuid_list"  : images_uuid_list
     }
 
-    file_name = "preprocessed_context.json"
-    output_path = os.path.join(fpath, file_name)
+    output_path = os.path.join(fpath, json_file)
     
     with open(output_path, "w") as file:
         json.dump(data, file, indent = 4)
@@ -439,36 +442,50 @@ def multi_modal_rag_chain(retriever, prompt_type = "default", max_tokens = 1024)
     return chain
 
 
-def invoke_pipeline():
+def invoke_pipeline(document_id):
 
-    fpath = os.getcwd()
-    fname = "rflr-performance-attribution.pdf"
+    # Find the PDF document in the directory of document_id
+    fpath = os.path.join(os.getcwd(), os.getenv("DOWNLOAD_DIRECTORY", "downloads") , document_id)
+    dir_contents = os.listdir(fpath)
+    
+    for file in dir_contents:
+        if file.endswith(".pdf"):
+            fname = file
 
-    # Partition and chunk the PDF
-    texts, tables, texts_4k_token = chunk_pdf(fpath, fname)
+    # Predefine the vector database details
+    database_name = document_id + "_database"
+    collection_name = document_id + "_collection"
+    persistent_directory = os.path.join(fpath, database_name)
 
-    # (OPTIONAL) Summarize the text content
-    text_summaries, table_summaries = generate_text_summaries(
-        texts_4k_token, 
-        tables, 
-        summarize_texts = False
-    )
+    # Save preprocessed contents to a json file
+    preprocessed_json = os.getenv("PREPROCESSED_JSON_FILE")
 
-    # Generate summaries for the images
-    img_base64_list, image_summaries = generate_img_summaries(os.path.join(fpath, "figures"))
+    # Check if the vector store and the json file already exist to avoid rebuilding
+    # the vector index
+    json_exists = database_exists = False
 
-    # Save all preprocessed data
-    save_preprocessed_context(fpath, texts, text_summaries, tables, table_summaries, img_base64_list, image_summaries)
+    json_exists = preprocessed_json in dir_contents and os.path.isfile(os.path.join(fpath, preprocessed_json))
+    database_exists = database_name in dir_contents and os.path.isdir(os.path.join(fpath, database_name))
 
-    # The vectorstore to use to index the summaries
-    vectorstore = Chroma(
-        collection_name     = "Multimodal_RAG_collection_PDF1", 
-        embedding_function  = OpenAIEmbeddings(api_key = os.getenv("OPEN_AI_API")),
-        persist_directory   = "./MLR_with_langchain_database"
-    )
+    if not json_exists and not database_exists:
 
-    file_name = "preprocessed_context.json"
-    file_path = os.path.join(fpath, file_name)
+        # Partition and chunk the PDF
+        texts, tables, texts_4k_token = chunk_pdf(fpath, fname)
+
+        # (OPTIONAL) Summarize the text content
+        text_summaries, table_summaries = generate_text_summaries(
+            texts_4k_token, 
+            tables, 
+            summarize_texts = False
+        )
+
+        # Generate summaries for the images
+        img_base64_list, image_summaries = generate_img_summaries(os.path.join(fpath, os.getenv("EXTRACTED_IMAGE_DIRECTORY")))
+
+        # Save all preprocessed data
+        save_preprocessed_context(fpath, preprocessed_json, texts, text_summaries, tables, table_summaries, img_base64_list, image_summaries)
+
+    file_path = os.path.join(fpath, preprocessed_json)
 
     text_summaries = texts = texts_uuid_list = []
     table_summaries = tables = tables_uuid_list = [] 
@@ -488,6 +505,17 @@ def invoke_pipeline():
         image_summaries = data["image_summaries"]
         img_base64_list = data["img_base64_list"]
         images_uuid_list = data["images_uuid_list"]
+
+    
+    # The vectorstore to use to index the summaries
+    vectorstore = Chroma(
+        collection_name     = collection_name, 
+        embedding_function  = OpenAIEmbeddings(
+            model   = "text-embedding-3-large",
+            api_key = os.getenv("OPEN_AI_API")
+        ),
+        persist_directory   = persistent_directory
+    )
 
     # Create retriever
     retriever_multi_vector_img = create_multi_vector_retriever(
@@ -510,7 +538,7 @@ def invoke_pipeline():
     # chain_multimodal_rag_report = multi_modal_rag_chain(retriever_multi_vector_img, prompt_type="report", max_tokens=2048)
 
     # Check retrieval
-    query = "What is Fama Decomposition"
+    query = input("Ask a question: ")
     docs = retriever_multi_vector_img.invoke(query)
 
     # Check what docs were retrieved
@@ -521,8 +549,9 @@ def invoke_pipeline():
 
     # Run the default RAG chain
     response = chain_multimodal_rag_default.invoke(query)
+    print("\n\n\nGPT's response:")
     print(response)
 
 if __name__ == "__main__":
-    invoke_pipeline()
+    invoke_pipeline(document_id="3dfc65a6f4dd48d1ae58c254a9c0b418")
     
