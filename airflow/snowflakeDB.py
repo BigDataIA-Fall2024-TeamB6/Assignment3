@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 # Load environment variables from .env file
 load_dotenv()
 
-
 def connect_to_db():
     """
     Establish a connection to Snowflake using environment variables.
@@ -30,6 +29,37 @@ def connect_to_db():
     except snowflake.connector.errors.Error as e:
         logger.error("Failed to connect to Snowflake: %s", e)
         return None
+
+def create_storage_integration_and_stage(cursor):
+    """
+    Create storage integration and stage in Snowflake.
+    """
+    try:
+        # Create storage integration
+        cursor.execute("""
+        CREATE OR REPLACE STORAGE INTEGRATION my_s3_integration
+          TYPE = EXTERNAL_STAGE
+          STORAGE_PROVIDER = 'S3'
+          ENABLED = TRUE
+          STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::339713146727:role/mysnowflakerole'
+          STORAGE_ALLOWED_LOCATIONS = ('s3://publications-info/');
+        """)
+        logger.info("Created storage integration: my_s3_integration")
+
+        # Describe storage integration for verification
+        cursor.execute("DESC INTEGRATION my_s3_integration;")
+        integration_desc = cursor.fetchall()
+        logger.info("Storage Integration Description: %s", integration_desc)
+
+        # Create external stage
+        cursor.execute("""
+        CREATE OR REPLACE STAGE my_s3_stage
+          STORAGE_INTEGRATION = my_s3_integration
+          URL = 's3://publications-info/';
+        """)
+        logger.info("Created stage: my_s3_stage")
+    except Exception as e:
+        logger.error("Error creating storage integration and stage: %s", e)
 
 def drop_tables(cursor):
     """
@@ -79,7 +109,7 @@ def create_tables(cursor):
             v:title::string AS title,
             v:overview::string AS overview,
             CASE 
-                WHEN POSITION('.jpg' IN v:image_url::string) > 0 THEN 
+                WHEN POSITION('.jpg' IN v:cover_image_url::string) > 0 THEN 
                     's3://publications-info/' || v:document_id::string || '/cover_image.jpg' 
                 ELSE NULL 
             END AS image_url,
@@ -109,8 +139,6 @@ def create_tables(cursor):
         except Exception as e:
             logger.error("Error creating tables or inserting data: %s", e)
 
-
-
 def main():
     conn = connect_to_db()
     if conn is None:
@@ -120,7 +148,10 @@ def main():
     if conn:
         try:
             cursor = conn.cursor()
-            
+
+            # Create storage integration and stage
+            create_storage_integration_and_stage(cursor)
+
             # Drop tables if they exist
             drop_tables(cursor)
 
@@ -139,19 +170,6 @@ def main():
             results = cursor.fetchall()
             logger.info("Entries in publications_info: %d", len(results))
             for row in results:
-                logger.info(row)
-
-            # Fetch results from views for verification
-            cursor.execute("SELECT * FROM metadata_view;")
-            metadata_view_results = cursor.fetchall()
-            logger.info("Entries in metadata_view: %d", len(metadata_view_results))
-            for row in metadata_view_results:
-                logger.info(row)
-
-            cursor.execute("SELECT * FROM users_view;")
-            users_view_results = cursor.fetchall()
-            logger.info("Entries in users_view: %d", len(users_view_results))
-            for row in users_view_results:
                 logger.info(row)
 
         except Exception as e:

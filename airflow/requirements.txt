@@ -2,6 +2,8 @@ beautifulsoup4
 selenium
 python-dotenv
 Unidecode
+snowflake-connector-python
+boto3
 pymupdf
 requests
 openpyxl
