@@ -248,9 +248,7 @@ def create_multi_vector_retriever(
         docstore        = store,
         id_key          = id_key,
         search_type     = "similarity",
-        search_kwargs   = {
-            "k": 6
-        }
+        search_kwargs   = {"k": 6}
     )
 
     # Helper function to add documents to the vectorstore and docstore
@@ -287,6 +285,27 @@ def create_multi_vector_retriever(
         add_documents(retriever, image_summaries, images, images_uuid_list)
 
     return retriever
+
+def save_report_vectorstore(report_vectorstore, response):
+    """ Add the report response to vectorstore if prompt_type is 'report' """
+    
+    report_doc = Document(
+        page_content = response,
+        metadata = {
+            "doc_id"    : str(uuid.uuid4()),
+            "doc_type"  : "report"
+        }
+    )
+    
+    report_vectorstore.add_documents([report_doc])
+
+def create_report_retriever(report_vectorstore):
+    """ Create a retriever for the vectorstore """
+
+    return report_vectorstore.as_retriever(
+        search_type     = "similarity",
+        search_kwargs   = {'k':3}
+    )
 
 def looks_like_base64(sb):
     """Check if the string looks like base64"""
@@ -442,7 +461,7 @@ def multi_modal_rag_chain(retriever, prompt_type = "default", max_tokens = 1024)
     return chain
 
 
-def invoke_pipeline(document_id):
+def invoke_pipeline(document_id, prompt_type = "full_text", report_as_source = False):
 
     # Find the PDF document in the directory of document_id
     fpath = os.path.join(os.getcwd(), os.getenv("DOWNLOAD_DIRECTORY", "downloads") , document_id)
@@ -452,10 +471,15 @@ def invoke_pipeline(document_id):
         if file.endswith(".pdf"):
             fname = file
 
-    # Predefine the vector database details
-    database_name = document_id + "_database"
-    collection_name = document_id + "_collection"
-    persistent_directory = os.path.join(fpath, database_name)
+    # Define full_text vector database details
+    full_text_database_name = document_id + "_full_text_database"
+    full_text_collection_name = document_id + "_full_text_collection"
+    full_text_persistent_directory = os.path.join(fpath, full_text_database_name)
+
+    # Define report vector database details
+    report_database_name = document_id + "_report_database"
+    report_collection_name = document_id + "_report_collection"
+    report_persistent_directory = os.path.join(fpath, report_database_name)
 
     # Save preprocessed contents to a json file
     preprocessed_json = os.getenv("PREPROCESSED_JSON_FILE")
@@ -465,7 +489,7 @@ def invoke_pipeline(document_id):
     json_exists = database_exists = False
 
     json_exists = preprocessed_json in dir_contents and os.path.isfile(os.path.join(fpath, preprocessed_json))
-    database_exists = database_name in dir_contents and os.path.isdir(os.path.join(fpath, database_name))
+    database_exists = full_text_database_name in dir_contents and os.path.isdir(os.path.join(fpath, full_text_database_name))
 
     if not json_exists and not database_exists:
 
@@ -494,32 +518,42 @@ def invoke_pipeline(document_id):
     with open(file_path, "r") as file:
         data = json.load(file)
         
-        text_summaries = data["text_summaries"]
         texts = data["texts"]
+        text_summaries = data["text_summaries"]
         texts_uuid_list = data["texts_uuid_list"]
         
-        table_summaries = data["table_summaries"]
         tables = data["tables"]
+        table_summaries = data["table_summaries"]
         tables_uuid_list = data["tables_uuid_list"]
         
-        image_summaries = data["image_summaries"]
         img_base64_list = data["img_base64_list"]
+        image_summaries = data["image_summaries"]
         images_uuid_list = data["images_uuid_list"]
 
     
-    # The vectorstore to use to index the summaries
-    vectorstore = Chroma(
-        collection_name     = collection_name, 
+    # The full text vectorstore to use to index the summaries
+    full_text_vectorstore = Chroma(
+        collection_name     = full_text_collection_name, 
         embedding_function  = OpenAIEmbeddings(
             model   = "text-embedding-3-large",
             api_key = os.getenv("OPEN_AI_API")
         ),
-        persist_directory   = persistent_directory
+        persist_directory   = full_text_persistent_directory
     )
 
-    # Create retriever
+    # The report vectorstore to index reports
+    report_vectorstore = Chroma(
+        collection_name     = report_collection_name, 
+        embedding_function  = OpenAIEmbeddings(
+            model   = "text-embedding-3-large",
+            api_key = os.getenv("OPEN_AI_API")
+        ),
+        persist_directory   = report_persistent_directory
+    )
+
+    # Create full_text_retriever
     retriever_multi_vector_img = create_multi_vector_retriever(
-        vectorstore,
+        full_text_vectorstore,
         text_summaries,
         texts,
         texts_uuid_list,
@@ -531,15 +565,34 @@ def invoke_pipeline(document_id):
         images_uuid_list
     )
 
-    # Default RAG chain
-    chain_multimodal_rag_default = multi_modal_rag_chain(retriever_multi_vector_img, prompt_type="default")
-    
-    # RAG chain for generating reports
-    # chain_multimodal_rag_report = multi_modal_rag_chain(retriever_multi_vector_img, prompt_type="report", max_tokens=2048)
+    # Create report_retriever
+    retriever_report = create_report_retriever(report_vectorstore)
 
     # Check retrieval
     query = input("Ask a question: ")
-    docs = retriever_multi_vector_img.invoke(query)
+
+    if prompt_type == "report":
+        if report_as_source:
+            # RAG chain for Q&A, with report_vectorstore as source
+            chain_multimodal_rag = multi_modal_rag_chain(retriever_report, prompt_type="report", max_tokens=2048)
+            docs = retriever_report.invoke(query)
+        
+        else:
+            # RAG chain for generating reports, with full_text_vectorstore as source
+            chain_multimodal_rag = multi_modal_rag_chain(retriever_multi_vector_img, prompt_type="report", max_tokens=2048)
+            docs = retriever_multi_vector_img.invoke(query)
+
+    if prompt_type == "full_text":
+        if report_as_source:
+            # Default Q&A RAG chain, with report_vectorstore as source
+            chain_multimodal_rag = multi_modal_rag_chain(retriever_report, prompt_type="default")
+            docs = retriever_report.invoke(query)
+        
+        else:
+            # Default Q&A RAG chain, with full_text_vectorstore as source
+            chain_multimodal_rag = multi_modal_rag_chain(retriever_multi_vector_img, prompt_type="default")
+            docs = retriever_multi_vector_img.invoke(query)
+    
 
     # Check what docs were retrieved
     print("Documents retrieved: ", len(docs))
@@ -548,10 +601,18 @@ def invoke_pipeline(document_id):
         print(docs[i])
 
     # Run the default RAG chain
-    response = chain_multimodal_rag_default.invoke(query)
-    print("\n\n\nGPT's response:")
+    response = chain_multimodal_rag.invoke(query)
+    print("LLM's response:")
     print(response)
 
+    # Save and index reports in report_vectorstore
+    if prompt_type == "report":
+        save_report_vectorstore(report_vectorstore, response)
+
 if __name__ == "__main__":
-    invoke_pipeline(document_id="3dfc65a6f4dd48d1ae58c254a9c0b418")
+    invoke_pipeline(
+        document_id         = "3dfc65a6f4dd48d1ae58c254a9c0b418",
+        prompt_type         = "report",
+        report_as_source    = True
+    )
     
