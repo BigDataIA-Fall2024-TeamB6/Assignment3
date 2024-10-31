@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import json
 import time
@@ -299,7 +300,8 @@ def stage2_scraper(document_id, title, url):
                     for div in div_without_class:
                         
                         for tag in div.find_all(['p', 'ol', 'ul'], class_=None):
-                            overview = overview + " " + unidecode(tag.get_text().strip().replace("\n", "").replace("\t\t\t\t\t", " "))
+                            overview = overview + " " + unidecode(tag.get_text().strip().replace("\n", ""))
+                            overview = re.sub(r'\t+', ' ', overview)
 
                     logger.info("SCRAPER - stage2_scraper() - Overview content generated")
 
