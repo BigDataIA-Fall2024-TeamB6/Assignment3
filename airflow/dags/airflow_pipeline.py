@@ -63,11 +63,9 @@ def create_client():
     try:    
         # Set WebDriver options (headless mode to run without UI)
         options = Options()
-        options.add_argument("--headless")  # Use "--headless" for headless mode; remove to see the browser
+        options.add_argument("--headless") 
 
-        # Specify the path to the ChromeDriver binary explicitly
-        chromedriver_path = "/usr/bin/chromedriver"
-        service = Service(chromedriver_path)
+        service = Service(ChromeDriverManager().install())
 
         # Create a Google Chrome WebDriver using the specified service
         driver = webdriver.Chrome(service=service, options=options)
@@ -600,7 +598,7 @@ with DAG(
     'publication_scraper_dag',
     default_args=default_args,
     description='A DAG to scrape publications, upload to S3, and then load data into Snowflake',
-    schedule_interval='@daily',  # Adjust schedule as needed
+    schedule_interval='@daily',
     start_date=datetime(2023, 10, 26),
     catchup=False,
 ) as dag:
