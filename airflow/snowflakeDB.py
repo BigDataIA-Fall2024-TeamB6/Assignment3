@@ -68,7 +68,8 @@ def drop_tables(cursor):
     drop_commands = {
         "drop_metadata_json_table": "DROP TABLE IF EXISTS metadata_json;",
         "drop_publications_info_table": "DROP TABLE IF EXISTS publications_info;",
-        "drop_users_table": "DROP TABLE IF EXISTS users;"
+        "drop_users_table": "DROP TABLE IF EXISTS users;",
+        "drop_research_notes_table": "DROP TABLE IF EXISTS research_notes;"
     }
     for table_name, command in drop_commands.items():
         try:
@@ -130,6 +131,16 @@ def create_tables(cursor):
             password VARCHAR(255) NOT NULL,
             jwt_token TEXT
         );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS research_notes (
+            document_id STRING NOT NULL,
+            user_id STRING NOT NULL,
+            prompt_type STRING NOT NULL,
+            prompt STRING NOT NULL,
+            response TEXT NOT NULL
+        );
+
         """
     ]
     for command in create_commands:
