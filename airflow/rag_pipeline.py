@@ -7,6 +7,7 @@ import base64
 from PIL import Image
 from unidecode import unidecode
 from dotenv import load_dotenv
+from cleanlab_studio import Studio
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 from langchain.storage import InMemoryStore
@@ -20,7 +21,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 # Load environment variables
 load_dotenv()
@@ -444,6 +445,13 @@ def multi_modal_rag_chain(retriever, prompt_type = "default", max_tokens = 1024)
         api_key     = os.getenv("OPEN_AI_API")
     )
 
+    # model = ChatNVIDIA(
+    #     model       = "meta/llama-3.2-90b-vision-instruct",
+    #     api_key     = os.getenv("NVIDIA_API"),
+    #     temperature = 0,
+    #     max_tokens  = max_tokens
+    # )
+
     # Lambda function that includes both data_dict and prompt_type
     prompt_func = lambda data_dict: img_prompt_func(data_dict, prompt_type = prompt_type)
 
@@ -600,10 +608,36 @@ def invoke_pipeline(document_id, prompt_type = "full_text", report_as_source = F
         print(f"Document: {i}")
         print(docs[i])
 
+    print("Image Documents fetched:")
+    doc_limit = len(docs) if len(docs) < 3 else 3
+    
+    images_retrieved = {
+        "length": 0,
+        "content": []
+    }
+    for i in range(doc_limit):
+        if looks_like_base64(docs[i]):
+            images_retrieved['length'] += 1
+            images_retrieved['content'].append(docs[i])
+
+    print(images_retrieved)
+
     # Run the default RAG chain
     response = chain_multimodal_rag.invoke(query)
     print("LLM's response:")
     print(response)
+
+    # Get trust score
+    studio = Studio(os.getenv("TLM_API_KEY"))
+    tlm = studio.TLM(
+        options = {
+            "model"     : "gpt-4o"
+        }
+    )
+    score = tlm.get_trustworthiness_score(prompt=query, response=response)
+
+    print("Trust score:")
+    print(score)
 
     # Save and index reports in report_vectorstore
     if prompt_type == "report":
@@ -613,6 +647,6 @@ if __name__ == "__main__":
     invoke_pipeline(
         document_id         = "3dfc65a6f4dd48d1ae58c254a9c0b418",
         prompt_type         = "report",
-        report_as_source    = True
+        report_as_source    = False
     )
     
