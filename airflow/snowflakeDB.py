@@ -126,7 +126,7 @@ def create_tables(cursor):
             user_id INT AUTOINCREMENT PRIMARY KEY,
             first_name VARCHAR(50) NOT NULL,
             last_name VARCHAR(50) NOT NULL,
-            phone VARCHAR(15) NOT NULL,
+            phone VARCHAR(50) NOT NULL,
             email VARCHAR(100) NOT NULL,
             password VARCHAR(255) NOT NULL,
             jwt_token TEXT
@@ -134,10 +134,9 @@ def create_tables(cursor):
         """,
         """
         CREATE TABLE IF NOT EXISTS research_notes (
-            document_id STRING NOT NULL,
-            user_id STRING NOT NULL,
-            prompt_type STRING NOT NULL,
-            prompt STRING NOT NULL,
+            document_id VARCHAR(50) NOT NULL,
+            user_id VARCHAR(50) NOT NULL,
+            prompt VARCHAR(225) NOT NULL,
             response TEXT NOT NULL
         );
 
