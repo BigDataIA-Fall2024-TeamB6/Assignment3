@@ -10,15 +10,15 @@ RUN apt-get update && \
     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
     apt-get install -y ./google-chrome-stable_current_amd64.deb && \
     rm google-chrome-stable_current_amd64.deb && \
-    wget -q https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip && \
-    unzip chromedriver_linux64.zip -d /usr/local/bin/ && \
-    chmod +x /usr/local/bin/chromedriver && \
-    rm chromedriver_linux64.zip
+    wget -q https://storage.googleapis.com/chrome-for-testing-public/130.0.6723.91/linux64/chromedriver-linux64.zip && \
+    unzip chromedriver-linux64.zip -d /usr/local/bin/ && \
+    chmod +x /usr/local/bin/chromedriver-linux64/chromedriver && \
+    rm chromedriver-linux64.zip
 
 # Set environment variable for PATH to ensure only necessary directories are included
 ENV PATH="/home/airflow/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Switch back to the airflow user to maintain container security
+# Switch back to the airflow user
 USER airflow
 
 # Install additional Python libraries
